@@ -15,7 +15,7 @@ Deployed on Vercel: **https://your-project.vercel.app** _(update after deploy)_
 - **Next.js** (App Router) — frontend + API routes in one deployable app
 - **TypeScript** — end to end
 - **Tailwind CSS + Shadcn UI** — clean, minimal styling
-- **Google Gemini API** (`gemini-1.5-flash`, free tier) — the reasoning engine, called server-side
+- **Google Gemini API** (`gemini-2.5-flash`, free tier) — the reasoning engine, called server-side
 - **Vercel** — zero-config hosting
 
 The Gemini call happens inside a Next.js API route (`/api/recommend`) so the API key never reaches the client.

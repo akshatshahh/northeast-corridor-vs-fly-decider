@@ -108,7 +108,8 @@ Needs wifi: ${needsWifi ? "yes" : "no"}`;
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      // gemini-1.5-flash has been retired; 2.5-flash is the current free-tier fast model.
+      model: "gemini-2.5-flash",
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: {
         responseMimeType: "application/json",
