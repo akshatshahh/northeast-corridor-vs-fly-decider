@@ -8,7 +8,7 @@ Planning a trip between two US cities usually means opening ten tabs in Google F
 
 ## Live URL
 
-Deployed on Vercel: **https://your-project.vercel.app** _(update after deploy)_
+Deployed on Vercel: **https://northeast-corridor-vs-fly-decider.vercel.app**
 
 ## Stack
 
