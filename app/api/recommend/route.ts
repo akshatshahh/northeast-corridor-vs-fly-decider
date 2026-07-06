@@ -32,7 +32,45 @@ Given the origin, destination, travel date, preference (fastest/cheapest/most co
 
 const VALID_MODES: TravelMode[] = ["TRAIN", "FLY", "DRIVE", "BUS"];
 
+const VALID_PREFERENCES = ["fastest", "cheapest", "most comfortable"];
+
 const ERROR_RESPONSE = { error: "Could not get recommendation, try again" };
+
+// Abuse limits: this endpoint spends the owner's Gemini quota, so cap input
+// size and request rate before ever calling the model.
+const MAX_BODY_BYTES = 2000;
+const MAX_CITY_LENGTH = 120;
+const MAX_DATE_LENGTH = 40;
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+// Best-effort, per-instance rate limiter. On serverless this only protects a
+// single warm instance; a shared store (e.g. Vercel KV / Upstash) is needed for
+// strict global limits. It still blocks casual hammering from one client.
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    rateBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_LIMIT_MAX;
+}
+
+function getClientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return request.headers.get("x-real-ip") ?? "unknown";
+}
+
+function sanitizeField(value: unknown, maxLength: number): string {
+  if (typeof value !== "string") return "";
+  // Collapse whitespace/newlines to blunt prompt-injection formatting tricks.
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
 
 function extractJson(text: string): unknown {
   // Strip markdown code fences if Gemini wraps the JSON.
@@ -87,14 +125,34 @@ export async function POST(request: Request) {
     return NextResponse.json(ERROR_RESPONSE, { status: 500 });
   }
 
-  let body: RecommendRequest;
+  if (isRateLimited(getClientIp(request))) {
+    return NextResponse.json(
+      { error: "Too many requests, please slow down" },
+      { status: 429 }
+    );
+  }
+
+  // Reject oversized payloads before parsing to avoid wasting work/tokens.
+  const raw = await request.text();
+  if (raw.length > MAX_BODY_BYTES) {
+    return NextResponse.json(ERROR_RESPONSE, { status: 413 });
+  }
+
+  let body: Partial<RecommendRequest>;
   try {
-    body = (await request.json()) as RecommendRequest;
+    body = JSON.parse(raw) as Partial<RecommendRequest>;
   } catch {
     return NextResponse.json(ERROR_RESPONSE, { status: 400 });
   }
 
-  const { origin, destination, date, preference, needsWifi } = body ?? {};
+  const origin = sanitizeField(body?.origin, MAX_CITY_LENGTH);
+  const destination = sanitizeField(body?.destination, MAX_CITY_LENGTH);
+  const date = sanitizeField(body?.date, MAX_DATE_LENGTH);
+  const preference = VALID_PREFERENCES.includes(body?.preference as string)
+    ? (body?.preference as string)
+    : "fastest";
+  const needsWifi = body?.needsWifi === true;
+
   if (!origin || !destination) {
     return NextResponse.json(ERROR_RESPONSE, { status: 400 });
   }
@@ -102,7 +160,7 @@ export async function POST(request: Request) {
   const userPrompt = `Origin: ${origin}
 Destination: ${destination}
 Travel date: ${date || "not specified"}
-Preference: ${preference || "fastest"}
+Preference: ${preference}
 Needs wifi: ${needsWifi ? "yes" : "no"}`;
 
   try {
